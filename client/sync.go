@@ -73,7 +73,7 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 							return err
 						}
 						subCollectionName := subCollection.ID
-						subCollectionItems := make(map[string]interface{})
+						subCollectionItems := make([]interface{}, 0)
 						subCollectionDocIter := subCollection.Query.Documents(ctx)
 						for {
 							subCollectionDocSnap, err := subCollectionDocIter.Next()
@@ -87,7 +87,7 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 							subCollectionItem["__id"] = subCollectionDocSnap.Ref.ID
 							subCollectionItem["__created_at"] = subCollectionDocSnap.CreateTime
 							subCollectionItem["__updated_at"] = subCollectionDocSnap.UpdateTime
-							subCollectionItems[subCollectionDocSnap.Ref.ID] = subCollectionItem
+							subCollectionItems = append(subCollectionItems, subCollectionItem)
 						}
 						item[subCollectionName] = subCollectionItems
 					}
