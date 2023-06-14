@@ -12,6 +12,7 @@ type Spec struct {
 	ProjectID          string `json:"project_id"`
 	UseBase64          bool   `json:"use_base64"`
 	ServiceAccountJSON string `json:"service_account_json"`
+	NestedCollections  bool   `json:"nested_collections"`
 	MaxBatchSize       int    `json:"max_batch_size"`
 	OrderBy            string `json:"order_by"`
 	OrderDirection     string `json:"order_direction"`
@@ -24,6 +25,9 @@ func (s *Spec) Validate() error {
 			return fmt.Errorf("failed to decode service_account_json: %w", err)
 		}
 		s.ServiceAccountJSON = string(data)
+	}
+	if s.NestedCollections {
+		return fmt.Errorf("nested_collections is not supported")
 	}
 	s.OrderDirection = strings.ToLower(s.OrderDirection)
 	if s.OrderDirection != "" && s.OrderDirection != "asc" && s.OrderDirection != "desc" {
@@ -41,5 +45,8 @@ func (s *Spec) SetDefaults() {
 	}
 	if s.ProjectID == "" {
 		s.ProjectID = firestore.DetectProjectID
+	}
+	if s.NestedCollections {
+		s.NestedCollections = true
 	}
 }

@@ -22,9 +22,9 @@ func (c *Client) Sync(ctx context.Context, metrics *source.Metrics, res chan<- *
 }
 
 func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- *schema.Resource) error {
-	var err error
 	lastDocumentId := ""
 	maxBatchSize := c.maxBatchSize
+	eg, ctx := errgroup.WithContext(ctx)
 	collection := c.client.Collection(table.Name)
 	for {
 		orderBy := firestore.DocumentID
@@ -36,7 +36,6 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 		if c.orderDirection == "desc" {
 			dir = firestore.Desc
 		}
-
 		query := collection.Query.
 			OrderBy(orderBy, dir).
 			Limit(maxBatchSize)
@@ -60,27 +59,65 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 				skippedCount++
 				continue
 			}
-			lastDocumentId = docSnap.Ref.ID
-			item := docSnap.Data()
-			resource := schema.NewResourceData(table, nil, item)
-			err = resource.Set("__id", docSnap.Ref.ID)
-			if err != nil {
-				return err
+			pushData := func() error {
+				lastDocumentId = docSnap.Ref.ID
+				item := docSnap.Data()
+				subCollectionIter := docSnap.Ref.Collections(ctx)
+				if c.nestedCollections {
+					for {
+						subCollection, err := subCollectionIter.Next()
+						if err != nil {
+							if err == iterator.Done {
+								break
+							}
+							return err
+						}
+						subCollectionName := subCollection.ID
+						subCollectionItems := make(map[string]interface{})
+						subCollectionDocIter := subCollection.Query.Documents(ctx)
+						for {
+							subCollectionDocSnap, err := subCollectionDocIter.Next()
+							if err != nil {
+								if err == iterator.Done {
+									break
+								}
+								return err
+							}
+							subCollectionItem := subCollectionDocSnap.Data()
+							subCollectionItem["__id"] = subCollectionDocSnap.Ref.ID
+							subCollectionItem["__created_at"] = subCollectionDocSnap.CreateTime
+							subCollectionItem["__updated_at"] = subCollectionDocSnap.UpdateTime
+							subCollectionItems[subCollectionDocSnap.Ref.ID] = subCollectionItem
+						}
+						item[subCollectionName] = subCollectionItems
+					}
+				}
+				resource := schema.NewResourceData(table, nil, item)
+				err = resource.Set("__id", docSnap.Ref.ID)
+				if err != nil {
+					return err
+				}
+				err = resource.Set("__created_at", docSnap.CreateTime)
+				if err != nil {
+					return err
+				}
+				err = resource.Set("__updated_at", docSnap.UpdateTime)
+				if err != nil {
+					return err
+				}
+				err = resource.Set("data", item)
+				if err != nil {
+					return err
+				}
+				c.metrics.TableClient[table.Name][c.ID()].Resources++
+				res <- resource
+				return nil
 			}
-			err = resource.Set("__created_at", docSnap.CreateTime)
-			if err != nil {
-				return err
+			if c.nestedCollections {
+				eg.Go(pushData)
+			} else {
+				pushData()
 			}
-			err = resource.Set("__updated_at", docSnap.UpdateTime)
-			if err != nil {
-				return err
-			}
-			err = resource.Set("data", item)
-			if err != nil {
-				return err
-			}
-			c.metrics.TableClient[table.Name][c.ID()].Resources++
-			res <- resource
 		}
 		c.logger.Info().Msgf("Synced %d documents from %s", documentCount, table.Name)
 		if skippedCount > 0 {
@@ -90,7 +127,7 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 			break
 		}
 	}
-	return err
+	return eg.Wait()
 }
 
 func (c *Client) syncTables(ctx context.Context, res chan<- *schema.Resource) error {

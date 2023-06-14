@@ -13,13 +13,14 @@ import (
 )
 
 type Client struct {
-	logger         zerolog.Logger
-	metrics        *source.Metrics
-	Tables         schema.Tables
-	client         *firestore.Client
-	maxBatchSize   int
-	orderBy        string
-	orderDirection string
+	logger            zerolog.Logger
+	metrics           *source.Metrics
+	Tables            schema.Tables
+	client            *firestore.Client
+	nestedCollections bool
+	maxBatchSize      int
+	orderBy           string
+	orderDirection    string
 }
 
 var _ schema.ClientMeta = (*Client)(nil)
@@ -57,11 +58,12 @@ func Configure(ctx context.Context, logger zerolog.Logger, spec specs.Source, _ 
 	}
 	zctx := logger.With().Str("module", "firestore-source")
 	c := &Client{
-		logger:         zctx.Logger(),
-		client:         client,
-		maxBatchSize:   firestoreSpec.MaxBatchSize,
-		orderBy:        firestoreSpec.OrderBy,
-		orderDirection: firestoreSpec.OrderDirection,
+		logger:            zctx.Logger(),
+		client:            client,
+		nestedCollections: firestoreSpec.NestedCollections,
+		maxBatchSize:      firestoreSpec.MaxBatchSize,
+		orderBy:           firestoreSpec.OrderBy,
+		orderDirection:    firestoreSpec.OrderDirection,
 	}
 
 	c.Tables, err = c.listTables(ctx, client)
