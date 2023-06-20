@@ -18,7 +18,7 @@ type Stringer interface {
 	String() string
 }
 
-func (*Client) listTables(ctx context.Context, client *firestore.Client) (schema.Tables, error) {
+func (c *Client) listTables(ctx context.Context, client *firestore.Client) (schema.Tables, error) {
 	var schemaTables schema.Tables
 	collections := client.Collections(ctx)
 	for {
@@ -30,7 +30,7 @@ func (*Client) listTables(ctx context.Context, client *firestore.Client) (schema
 			return nil, err
 		}
 
-		schemaTables = append(schemaTables, &schema.Table{
+		parentTable := &schema.Table{
 			Name: collection.ID,
 			Columns: schema.ColumnList{
 				{
@@ -44,7 +44,84 @@ func (*Client) listTables(ctx context.Context, client *firestore.Client) (schema
 				{Name: "__updated_at", Type: arrow.FixedWidthTypes.Timestamp_us},
 				{Name: "data", Type: types.ExtensionTypes.JSON},
 			},
-		})
+		}
+
+		if c.nestedCollectionsTables {
+			c.logger.Info().Msgf("Listing tables %s", collection.ID)
+			schemaTables, err = c.addCollectionTables(ctx, collection.ID, collection, parentTable)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		schemaTables = append(schemaTables, parentTable)
+	}
+	c.logger.Info().Msgf("Found %d tables", len(schemaTables))
+	return schemaTables, nil
+}
+
+func (c *Client) addCollectionTables(
+	ctx context.Context,
+	collectionId string,
+	collection *firestore.CollectionRef,
+	parentTable *schema.Table,
+) (schema.Tables, error) {
+	c.logger.Info().Msgf("Listing sub-tables of %s", collection.ID)
+	schemaTables := schema.Tables{}
+	docQuery := collection.Query.Limit(1000)
+	docIter := docQuery.Documents(ctx)
+	for {
+		docSnap, err := docIter.Next()
+
+		if err != nil {
+			if err == iterator.Done {
+				break
+			}
+			return nil, err
+		}
+		c.logger.Info().Msgf("Listing sub-tables of doc:%s", docSnap.Ref.ID)
+		if !docSnap.Exists() {
+			return schemaTables, nil
+		}
+		colIter := docSnap.Ref.Collections(ctx)
+		found := false
+		for {
+			nestedCol, err := colIter.Next()
+			if err != nil {
+				if err == iterator.Done {
+					break
+				}
+				return schemaTables, nil
+			}
+			newCollectionName := collectionId + "_" + nestedCol.ID
+			c.logger.Info().Msgf("Adding sub-table of %s: %s", collectionId, newCollectionName)
+			schemaTables = append(schemaTables, &schema.Table{
+				Name: newCollectionName,
+				Columns: schema.ColumnList{
+					{
+						Name:       "__id",
+						Type:       arrow.BinaryTypes.String,
+						PrimaryKey: true,
+						Unique:     true,
+						NotNull:    true,
+					},
+					{
+						Name:       "__parent_id",
+						Type:       arrow.BinaryTypes.String,
+						PrimaryKey: true,
+						Unique:     true,
+						NotNull:    true,
+					},
+					{Name: "__created_at", Type: arrow.FixedWidthTypes.Timestamp_us},
+					{Name: "__updated_at", Type: arrow.FixedWidthTypes.Timestamp_us},
+					{Name: "data", Type: types.ExtensionTypes.JSON},
+				},
+			})
+			found = true
+		}
+		if !found {
+			break
+		}
 	}
 	return schemaTables, nil
 }

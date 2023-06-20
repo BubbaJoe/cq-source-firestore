@@ -13,14 +13,15 @@ import (
 )
 
 type Client struct {
-	logger            zerolog.Logger
-	metrics           *source.Metrics
-	Tables            schema.Tables
-	client            *firestore.Client
-	nestedCollections bool
-	maxBatchSize      int
-	orderBy           string
-	orderDirection    string
+	logger                  zerolog.Logger
+	metrics                 *source.Metrics
+	Tables                  schema.Tables
+	client                  *firestore.Client
+	nestedCollections       bool
+	nestedCollectionsTables bool
+	maxBatchSize            int
+	orderBy                 string
+	orderDirection          string
 }
 
 var _ schema.ClientMeta = (*Client)(nil)
@@ -58,12 +59,13 @@ func Configure(ctx context.Context, logger zerolog.Logger, spec specs.Source, _ 
 	}
 	zctx := logger.With().Str("module", "firestore-source")
 	c := &Client{
-		logger:            zctx.Logger(),
-		client:            client,
-		nestedCollections: firestoreSpec.NestedCollections,
-		maxBatchSize:      firestoreSpec.MaxBatchSize,
-		orderBy:           firestoreSpec.OrderBy,
-		orderDirection:    firestoreSpec.OrderDirection,
+		logger:                  zctx.Logger(),
+		client:                  client,
+		nestedCollections:       firestoreSpec.NestedCollections,
+		nestedCollectionsTables: firestoreSpec.NestedCollectionsTables,
+		maxBatchSize:            firestoreSpec.MaxBatchSize,
+		orderBy:                 firestoreSpec.OrderBy,
+		orderDirection:          firestoreSpec.OrderDirection,
 	}
 
 	c.Tables, err = c.listTables(ctx, client)
@@ -72,6 +74,8 @@ func Configure(ctx context.Context, logger zerolog.Logger, spec specs.Source, _ 
 	}
 	if len(c.Tables) == 0 {
 		return nil, fmt.Errorf("no tables found")
+	} else {
+		logger.Info().Msgf("Found tables: %s", c.Tables.TableNames())
 	}
 	c.Tables, err = c.Tables.FilterDfs(spec.Tables, spec.SkipTables, spec.SkipDependentTables)
 	if err != nil {

@@ -1,5 +1,6 @@
 firestore
 config.yaml
-*.log
 dist/
+.cq/
 .gr.yaml
+*.log
