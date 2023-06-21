@@ -2,11 +2,13 @@ package client
 
 import (
 	"context"
+	"sync"
 
 	"cloud.google.com/go/firestore"
 	"github.com/apache/arrow/go/v13/arrow"
 	"github.com/cloudquery/plugin-sdk/v3/schema"
 	"github.com/cloudquery/plugin-sdk/v3/types"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/iterator"
 )
 
@@ -62,13 +64,15 @@ func (c *Client) listTables(ctx context.Context, client *firestore.Client) (sche
 }
 
 func (c *Client) addCollectionTables(
-	ctx context.Context,
+	baseCtx context.Context,
 	collectionId string,
 	collection *firestore.CollectionRef,
 	parentTable *schema.Table,
 ) (schema.Tables, error) {
+	eg, ctx := errgroup.WithContext(baseCtx)
 	c.logger.Info().Msgf("Listing sub-tables of %s", collection.ID)
 	schemaTables := schema.Tables{}
+	schemaTableLock := &sync.Mutex{}
 	docQuery := collection.Query.Limit(1000)
 	docIter := docQuery.Documents(ctx)
 	for {
@@ -80,55 +84,64 @@ func (c *Client) addCollectionTables(
 			}
 			return nil, err
 		}
-		c.logger.Info().Msgf("Listing sub-tables of doc:%s", docSnap.Ref.ID)
+		c.logger.Debug().Msgf("Listing sub-tables of doc:%s", docSnap.Ref.ID)
 		if !docSnap.Exists() {
-			return schemaTables, nil
+			continue
 		}
 		colIter := docSnap.Ref.Collections(ctx)
-		for {
-			nestedCol, err := colIter.Next()
-			if err != nil {
-				if err == iterator.Done {
-					break
+		eg.Go(func() error {
+			for {
+				nestedCol, err := colIter.Next()
+				if err != nil {
+					if err == iterator.Done {
+						break
+					}
+					return err
 				}
-				return schemaTables, nil
-			}
-			newCollectionName := collectionId + "_" + nestedCol.ID
-			// check if table already exists in schemaTables
-			found := false
-			for _, table := range schemaTables {
-				if table.Name == newCollectionName {
-					found = true
-					break
+				newCollectionName := collectionId + "_" + nestedCol.ID
+				// check if table already exists in schemaTables
+				found := false
+				schemaTableLock.Lock()
+				for _, table := range schemaTables {
+					if table.Name == newCollectionName {
+						found = true
+						break
+					}
 				}
-			}
-			if found {
-				continue
-			}
-
-			schemaTables = append(schemaTables, &schema.Table{
-				Name: newCollectionName,
-				Columns: schema.ColumnList{
-					{
-						Name:       "__id",
-						Type:       arrow.BinaryTypes.String,
-						PrimaryKey: true,
-						Unique:     true,
-						NotNull:    true,
+				if found {
+					schemaTableLock.Unlock()
+					continue
+				}
+				schemaTables = append(schemaTables, &schema.Table{
+					Name: newCollectionName,
+					Columns: schema.ColumnList{
+						{
+							Name:       "__id",
+							Type:       arrow.BinaryTypes.String,
+							PrimaryKey: true,
+							Unique:     true,
+							NotNull:    true,
+						},
+						{
+							Name:       "__parent_id",
+							Type:       arrow.BinaryTypes.String,
+							PrimaryKey: true,
+							Unique:     true,
+							NotNull:    true,
+						},
+						{Name: "__created_at", Type: arrow.FixedWidthTypes.Timestamp_us},
+						{Name: "__updated_at", Type: arrow.FixedWidthTypes.Timestamp_us},
+						{Name: "data", Type: types.ExtensionTypes.JSON},
 					},
-					{
-						Name:       "__parent_id",
-						Type:       arrow.BinaryTypes.String,
-						PrimaryKey: true,
-						Unique:     true,
-						NotNull:    true,
-					},
-					{Name: "__created_at", Type: arrow.FixedWidthTypes.Timestamp_us},
-					{Name: "__updated_at", Type: arrow.FixedWidthTypes.Timestamp_us},
-					{Name: "data", Type: types.ExtensionTypes.JSON},
-				},
-			})
-		}
+				})
+				schemaTableLock.Unlock()
+			}
+			return nil
+		})
+	}
+	err := eg.Wait()
+	if err != nil {
+		return nil, err
 	}
 	return schemaTables, nil
 }
