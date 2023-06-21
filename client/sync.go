@@ -96,26 +96,22 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 								return err
 							}
 							subCollectionItem := subCollectionDocSnap.Data()
-							subCollectionItem["__id"] = subCollectionDocSnap.Ref.ID
-							subCollectionItem["__created_at"] = subCollectionDocSnap.CreateTime
-							subCollectionItem["__updated_at"] = subCollectionDocSnap.UpdateTime
-							subCollectionItems = append(subCollectionItems, subCollectionItem)
-						}
-						if c.nestedCollectionsTables {
-							if subCollectionTable != nil {
-								subResource := schema.NewResourceData(subCollectionTable, resource, subCollectionItems)
-								subResource.Set("__id", subCollectionName)
-								subResource.Set("__parent_id", docSnap.Ref.ID)
-								subResource.Set("__created_at", docSnap.CreateTime)
-								subResource.Set("__updated_at", docSnap.UpdateTime)
-								subResource.Set("data", subCollectionItems)
-								c.metrics.TableClient[table.Name][c.ID()].Resources++
-								res <- subResource
+							if c.nestedCollectionsTables {
+								if subCollectionTable != nil {
+									subResource := schema.NewResourceData(subCollectionTable, resource, subCollectionItems)
+									subResource.Set("__id", subCollectionDocSnap.Ref.ID)
+									subResource.Set("__parent_id", docSnap.Ref.ID)
+									subResource.Set("__created_at", docSnap.CreateTime)
+									subResource.Set("__updated_at", docSnap.UpdateTime)
+									subResource.Set("data", subCollectionItem)
+									c.metrics.TableClient[table.Name][c.ID()].Resources++
+									res <- subResource
+								} else {
+									c.logger.Warn().Msgf("Table %s not found", subCollectionName)
+								}
 							} else {
-								c.logger.Warn().Msgf("Table %s not found", subCollectionName)
+								item[subCollectionName] = subCollectionItems
 							}
-						} else {
-							item[subCollectionName] = subCollectionItems
 						}
 					}
 				}
