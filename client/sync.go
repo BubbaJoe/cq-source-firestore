@@ -26,6 +26,7 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 	maxBatchSize := c.maxBatchSize
 	eg, ctx := errgroup.WithContext(ctx)
 	collection := c.client.Collection(table.Name)
+	c.logger.Info().Msgf("Syncing table %s", table.Name)
 	for {
 		orderBy := firestore.DocumentID
 		if c.orderBy != "" {
@@ -59,10 +60,11 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 				skippedCount++
 				continue
 			}
+			lastDocumentId = docSnap.Ref.ID
+			item := docSnap.Data()
+			subCollectionIter := docSnap.Ref.Collections(ctx)
+			resource := schema.NewResourceData(table, nil, nil)
 			pushData := func() error {
-				lastDocumentId = docSnap.Ref.ID
-				item := docSnap.Data()
-				subCollectionIter := docSnap.Ref.Collections(ctx)
 				if c.nestedCollections {
 					for {
 						subCollection, err := subCollectionIter.Next()
@@ -72,7 +74,17 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 							}
 							return err
 						}
-						subCollectionName := subCollection.ID
+
+						subCollectionName := collection.ID + "_" + subCollection.ID
+						// find the table
+						var subCollectionTable *schema.Table
+						for _, t := range c.Tables {
+							if t.Name == subCollectionName {
+								subCollectionTable = t
+								break
+							}
+						}
+
 						subCollectionItems := make([]interface{}, 0)
 						subCollectionDocIter := subCollection.Query.Documents(ctx)
 						for {
@@ -89,10 +101,24 @@ func (c *Client) syncTable(ctx context.Context, table *schema.Table, res chan<- 
 							subCollectionItem["__updated_at"] = subCollectionDocSnap.UpdateTime
 							subCollectionItems = append(subCollectionItems, subCollectionItem)
 						}
-						item[subCollectionName] = subCollectionItems
+						if c.nestedCollectionsTables {
+							if subCollectionTable != nil {
+								subResource := schema.NewResourceData(subCollectionTable, resource, subCollectionItems)
+								subResource.Set("__id", subCollectionName)
+								subResource.Set("__parent_id", docSnap.Ref.ID)
+								subResource.Set("__created_at", docSnap.CreateTime)
+								subResource.Set("__updated_at", docSnap.UpdateTime)
+								subResource.Set("data", subCollectionItems)
+								c.metrics.TableClient[table.Name][c.ID()].Resources++
+								res <- subResource
+							} else {
+								c.logger.Warn().Msgf("Table %s not found", subCollectionName)
+							}
+						} else {
+							item[subCollectionName] = subCollectionItems
+						}
 					}
 				}
-				resource := schema.NewResourceData(table, nil, item)
 				err = resource.Set("__id", docSnap.Ref.ID)
 				if err != nil {
 					return err

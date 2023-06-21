@@ -9,13 +9,14 @@ import (
 )
 
 type Spec struct {
-	ProjectID          string `json:"project_id"`
-	UseBase64          bool   `json:"use_base64"`
-	ServiceAccountJSON string `json:"service_account_json"`
-	NestedCollections  bool   `json:"nested_collections"`
-	MaxBatchSize       int    `json:"max_batch_size"`
-	OrderBy            string `json:"order_by"`
-	OrderDirection     string `json:"order_direction"`
+	ProjectID               string `json:"project_id"`
+	UseBase64               bool   `json:"use_base64"`
+	ServiceAccountJSON      string `json:"service_account_json"`
+	NestedCollections       bool   `json:"nested_collections"`
+	NestedCollectionsTables bool   `json:"extract_nested_collections"`
+	MaxBatchSize            int    `json:"max_batch_size"`
+	OrderBy                 string `json:"order_by"`
+	OrderDirection          string `json:"order_direction"`
 }
 
 func (s *Spec) Validate() error {
@@ -33,6 +34,9 @@ func (s *Spec) Validate() error {
 	if s.MaxBatchSize < 0 {
 		return fmt.Errorf("max_batch_size must be greater than 0")
 	}
+	if !s.NestedCollections && s.NestedCollectionsTables {
+		return fmt.Errorf("nested_collections must be enabled for nested_collections_tables to be enabled")
+	}
 	return nil
 }
 
@@ -42,8 +46,5 @@ func (s *Spec) SetDefaults() {
 	}
 	if s.ProjectID == "" {
 		s.ProjectID = firestore.DetectProjectID
-	}
-	if s.NestedCollections {
-		s.NestedCollections = true
 	}
 }
