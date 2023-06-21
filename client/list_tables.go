@@ -48,10 +48,11 @@ func (c *Client) listTables(ctx context.Context, client *firestore.Client) (sche
 
 		if c.nestedCollectionsTables {
 			c.logger.Info().Msgf("Listing tables %s", collection.ID)
-			schemaTables, err = c.addCollectionTables(ctx, collection.ID, collection, parentTable)
+			newSchemaTables, err := c.addCollectionTables(ctx, collection.ID, collection, parentTable)
 			if err != nil {
 				return nil, err
 			}
+			schemaTables = append(schemaTables, newSchemaTables...)
 		}
 
 		schemaTables = append(schemaTables, parentTable)
