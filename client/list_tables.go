@@ -85,7 +85,6 @@ func (c *Client) addCollectionTables(
 			return schemaTables, nil
 		}
 		colIter := docSnap.Ref.Collections(ctx)
-		found := false
 		for {
 			nestedCol, err := colIter.Next()
 			if err != nil {
@@ -95,7 +94,18 @@ func (c *Client) addCollectionTables(
 				return schemaTables, nil
 			}
 			newCollectionName := collectionId + "_" + nestedCol.ID
-			c.logger.Info().Msgf("Adding sub-table of %s: %s", collectionId, newCollectionName)
+			// check if table already exists in schemaTables
+			found := false
+			for _, table := range schemaTables {
+				if table.Name == newCollectionName {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+
 			schemaTables = append(schemaTables, &schema.Table{
 				Name: newCollectionName,
 				Columns: schema.ColumnList{
@@ -118,10 +128,6 @@ func (c *Client) addCollectionTables(
 					{Name: "data", Type: types.ExtensionTypes.JSON},
 				},
 			})
-			found = true
-		}
-		if !found {
-			break
 		}
 	}
 	return schemaTables, nil
